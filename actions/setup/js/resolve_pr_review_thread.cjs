@@ -20,6 +20,11 @@ const HANDLER_TYPE = "resolve_pull_request_review_thread";
 /**
  * Look up a review thread's parent PR number and repository via the GraphQL API.
  * Used to validate the thread before resolving.
+ *
+ * When the caller passes a `PullRequestReviewComment` node ID (PRRC_...) instead of
+ * a `PullRequestReviewThread` node ID (PRRT_...), the `reviewThread` field on the
+ * comment is fetched in the same query so that we can resolve the parent thread without
+ * any additional round-trips or iteration.
  * @param {any} github - GitHub GraphQL instance
  * @param {string} threadId - Review thread node ID (e.g., 'PRRT_kwDOABCD...')
  * @returns {Promise<
@@ -45,14 +50,14 @@ async function getThreadPullRequestInfo(github, threadId) {
           }
         }
         ... on PullRequestReviewComment {
+          reviewThread {
+            id
+            isResolved
+          }
           pullRequest {
             number
             repository {
-              name
               nameWithOwner
-              owner {
-                login
-              }
             }
           }
         }
@@ -66,15 +71,34 @@ async function getThreadPullRequestInfo(github, threadId) {
   if (!threadNode) {
     return { status: "missing" };
   }
+
   if (threadNode.__typename === "PullRequestReviewComment") {
-    return findThreadInfoForReviewComment(github, threadId, threadNode);
+    const reviewThread = threadNode.reviewThread;
+    if (!reviewThread?.id) {
+      return { status: "comment_without_thread" };
+    }
+    const pullRequest = threadNode.pullRequest;
+    return {
+      status: "thread",
+      threadId: reviewThread.id,
+      prNumber: pullRequest?.number,
+      repoNameWithOwner: pullRequest?.repository?.nameWithOwner ?? null,
+      isResolved: reviewThread.isResolved === true,
+    };
   }
+
   if (threadNode.__typename !== "PullRequestReviewThread") {
     return {
       status: "invalid_type",
       nodeType: threadNode.__typename || "unknown",
     };
   }
+
+  if (!threadNode.id) {
+    core.warning(`PullRequestReviewThread node returned without an id for input ${threadId}`);
+    return { status: "missing" };
+  }
+
   const pullRequest = threadNode.pullRequest;
 
   return {
@@ -82,125 +106,8 @@ async function getThreadPullRequestInfo(github, threadId) {
     threadId: threadNode.id,
     prNumber: pullRequest.number,
     repoNameWithOwner: pullRequest.repository?.nameWithOwner ?? null,
-    isResolved: threadNode?.isResolved === true,
+    isResolved: threadNode.isResolved === true,
   };
-}
-
-/**
- * Resolve a PullRequestReviewComment node ID to its containing review thread.
- * @param {any} github - GitHub GraphQL instance
- * @param {string} commentId - Pull request review comment node ID (e.g., 'PRRC_kwDOABCD...')
- * @param {any} commentNode - PullRequestReviewComment node returned by the initial lookup
- * @returns {Promise<
- *   | {status: "thread", threadId: string, prNumber: number, repoNameWithOwner: string|null, isResolved: boolean}
- *   | {status: "comment_without_thread"}
- * >}
- */
-async function findThreadInfoForReviewComment(github, commentId, commentNode) {
-  const pullRequest = commentNode.pullRequest;
-  const repository = pullRequest?.repository;
-  const prNumber = pullRequest?.number;
-  const repoOwner = repository?.owner?.login;
-  const repoName = repository?.name;
-  const repoNameWithOwner = repository?.nameWithOwner ?? (repoOwner && repoName ? `${repoOwner}/${repoName}` : null);
-
-  if (!prNumber || !repoOwner || !repoName) {
-    return { status: "comment_without_thread" };
-  }
-
-  const threadListQuery = /* GraphQL */ `
-    query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $repo) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              id
-              isResolved
-              comments(first: 100) {
-                pageInfo {
-                  hasNextPage
-                  endCursor
-                }
-                nodes {
-                  id
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  const threadCommentsQuery = /* GraphQL */ `
-    query ($threadId: ID!, $cursor: String) {
-      node(id: $threadId) {
-        ... on PullRequestReviewThread {
-          comments(first: 100, after: $cursor) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              id
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  let threadCursor = null;
-  do {
-    const result = await github.graphql(threadListQuery, {
-      owner: repoOwner,
-      repo: repoName,
-      number: prNumber,
-      cursor: threadCursor,
-    });
-    const reviewThreads = result?.repository?.pullRequest?.reviewThreads;
-
-    for (const thread of reviewThreads?.nodes || []) {
-      // Check first page of comments for this thread
-      if ((thread.comments?.nodes || []).some(comment => comment?.id === commentId)) {
-        return {
-          status: "thread",
-          threadId: thread.id,
-          prNumber,
-          repoNameWithOwner,
-          isResolved: thread.isResolved === true,
-        };
-      }
-
-      // If there are more comment pages, paginate within this thread
-      let commentCursor = thread.comments?.pageInfo?.hasNextPage ? thread.comments.pageInfo.endCursor : null;
-      while (commentCursor) {
-        const commentResult = await github.graphql(threadCommentsQuery, {
-          threadId: thread.id,
-          cursor: commentCursor,
-        });
-        const commentsPage = commentResult?.node?.comments;
-        if ((commentsPage?.nodes || []).some(comment => comment?.id === commentId)) {
-          return {
-            status: "thread",
-            threadId: thread.id,
-            prNumber,
-            repoNameWithOwner,
-            isResolved: thread.isResolved === true,
-          };
-        }
-        commentCursor = commentsPage?.pageInfo?.hasNextPage ? commentsPage.pageInfo.endCursor : null;
-      }
-    }
-
-    threadCursor = reviewThreads?.pageInfo?.hasNextPage ? reviewThreads.pageInfo.endCursor : null;
-  } while (threadCursor);
-
-  return { status: "comment_without_thread" };
 }
 
 /**
