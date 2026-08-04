@@ -107,7 +107,7 @@ Import this file and set `engine: id: aider` to use it:
 ```yaml
 engine:
   id: aider
-model: copilot/claude-sonnet-4-5
+model: copilot/claude-sonnet-4.5
 imports:
   - shared/aider.md
 ```
