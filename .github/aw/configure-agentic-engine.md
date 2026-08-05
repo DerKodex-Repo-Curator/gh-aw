@@ -113,7 +113,7 @@ engine:
     installation:
       package-manager: npm
       package-name: "@augmentcode/auggie"
-      version: "1.0.0"
+      version: "0.34.0"
       step-name: Install Auggie
       binary-name: auggie
       include-node-setup: true
@@ -130,6 +130,8 @@ engine:
       mcp-config-env-var: AUGGIE_MCP_CONFIG
       write-timestamp: true
 ```
+
+For `auggie`, set the `AUGMENT_SESSION_AUTH` repository secret.
 
 ## Field guide
 

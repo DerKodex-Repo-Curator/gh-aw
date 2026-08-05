@@ -545,6 +545,16 @@ func NewEngineRegistry() *EngineRegistry {
 		NewAntigravityEngine(),
 		NewPiEngine(),
 	}
+	for _, definition := range loadBuiltinEngineDefinitions() {
+		if definition.Behaviors == nil {
+			continue
+		}
+		engine, err := NewBehaviorDefinedEngine(definition)
+		if err != nil {
+			panic(fmt.Sprintf("BUG: failed to create built-in behavior-defined engine: %v", err))
+		}
+		builtins = append(builtins, engine)
+	}
 	for _, engine := range builtins {
 		if err := registry.Register(engine); err != nil {
 			panic(fmt.Sprintf("BUG: failed to register built-in engine: %v", err))

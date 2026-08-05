@@ -59,13 +59,14 @@ func TestAllowedExpressions(t *testing.T) {
 
 func TestAgenticEngines(t *testing.T) {
 	t.Parallel()
-	expectedEngines := []string{"claude", "codex", "copilot", "gemini", "antigravity", "pi"}
+	expectedEngines := []string{"claude", "codex", "copilot", "gemini", "antigravity", "pi", "auggie"}
 	require.NotEmpty(t, AgenticEngines)
 	assert.Equal(t, expectedEngines, AgenticEngines)
 	assert.Equal(t, "claude", string(ClaudeEngine))
 	assert.Equal(t, "codex", string(CodexEngine))
 	assert.Equal(t, "copilot", string(CopilotEngine))
 	assert.Equal(t, "gemini", string(GeminiEngine))
+	assert.Equal(t, "auggie", string(AuggieEngine))
 	assert.Equal(t, CopilotEngine, DefaultEngine)
 }
 
@@ -376,6 +377,7 @@ func TestGetAllEngineSecretNames(t *testing.T) {
 		"ANTHROPIC_API_KEY",
 		"OPENAI_API_KEY",
 		"CODEX_API_KEY",
+		"AUGMENT_SESSION_AUTH",
 		"GH_AW_GITHUB_TOKEN",
 	} {
 		assert.Contains(t, secrets, secret)
@@ -402,6 +404,7 @@ func TestGetEngineOption_AllBuiltInEngines(t *testing.T) {
 		{string(GeminiEngine), "Gemini", GeminiAPIKey, nil},
 		{string(AntigravityEngine), "Antigravity", AntigravityAPIKey, nil},
 		{string(PiEngine), "Pi", CopilotGitHubToken, []string{AnthropicAPIKey, OpenAIAPIKey, CodexAPIKey}},
+		{string(AuggieEngine), "Auggie", AugmentSessionAuth, nil},
 	}
 
 	for _, tt := range tests {

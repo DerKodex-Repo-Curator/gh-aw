@@ -420,6 +420,7 @@ func TestWasmGolden_AllEngines(t *testing.T) {
 		{"codex", "codex", "network:\n  allowed:\n    - defaults"},
 		{"gemini", "gemini", "network:\n  allowed:\n    - defaults"},
 		{"pi", "pi", "tools:\n  github:\n    mode: gh-proxy\n  cli-proxy: true\nnetwork:\n  allowed:\n    - defaults"},
+		{"auggie", "auggie", "network:\n  allowed:\n    - defaults"},
 	}
 
 	for _, eng := range engines {

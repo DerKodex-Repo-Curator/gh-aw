@@ -26,6 +26,8 @@ const (
 	AntigravityEngine EngineName = "antigravity"
 	// PiEngine is the Pi engine identifier (experimental)
 	PiEngine EngineName = "pi"
+	// AuggieEngine is the Augment Auggie engine identifier (experimental)
+	AuggieEngine EngineName = "auggie"
 
 	// DefaultEngine is the default agentic engine used when no engine is explicitly specified.
 	// Currently defaults to CopilotEngine.
@@ -36,7 +38,7 @@ const (
 // Deprecated: Use workflow.NewEngineCatalog(workflow.NewEngineRegistry()).IDs() for a
 // catalog-derived list. This slice is maintained for backward compatibility and must
 // stay in sync with the built-in engines registered in NewEngineCatalog.
-var AgenticEngines = []string{string(ClaudeEngine), string(CodexEngine), string(CopilotEngine), string(GeminiEngine), string(AntigravityEngine), string(PiEngine)}
+var AgenticEngines = []string{string(ClaudeEngine), string(CodexEngine), string(CopilotEngine), string(GeminiEngine), string(AntigravityEngine), string(PiEngine), string(AuggieEngine)}
 
 // EngineOption represents a selectable AI engine with its display metadata and secret configuration
 type EngineOption struct {
@@ -105,6 +107,14 @@ var EngineOptions = []EngineOption{
 		AlternativeSecrets: []string{AnthropicAPIKey, OpenAIAPIKey, CodexAPIKey},
 		KeyURL:             "https://github.com/settings/personal-access-tokens/new",
 		WhenNeeded:         "Pi engine workflows",
+	},
+	{
+		Value:       string(AuggieEngine),
+		Label:       "Auggie",
+		Description: "Augment Auggie coding agent (experimental)",
+		SecretName:  AugmentSessionAuth,
+		KeyURL:      "https://docs.augmentcode.com/cli/setup-auggie/authentication",
+		WhenNeeded:  "Auggie engine workflows",
 	},
 }
 
@@ -199,6 +209,8 @@ const (
 	GeminiAPIKey = "GEMINI_API_KEY"
 	// AntigravityAPIKey is the API key secret name required by the Antigravity engine.
 	AntigravityAPIKey = "ANTIGRAVITY_API_KEY"
+	// AugmentSessionAuth is the Augment session JSON required by the Auggie engine.
+	AugmentSessionAuth = "AUGMENT_SESSION_AUTH"
 )
 
 // Environment variable names for model configuration

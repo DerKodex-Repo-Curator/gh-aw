@@ -95,8 +95,8 @@ func (e *BehaviorDefinedEngine) GetRequiredSecretNames(workflowData *WorkflowDat
 		seen[secret] = struct{}{}
 		secrets = append(secrets, secret)
 	}
-	for _, binding := range e.definition.Auth {
-		addSecret(binding.Secret)
+	for _, secret := range e.getAuthSecretNames() {
+		addSecret(secret)
 	}
 	for _, secret := range collectCommonMCPSecrets(workflowData) {
 		addSecret(secret)
@@ -107,6 +107,19 @@ func (e *BehaviorDefinedEngine) GetRequiredSecretNames(workflowData *WorkflowDat
 	}
 	for varName := range collectHTTPMCPHeaderSecrets(tools) {
 		addSecret(varName)
+	}
+	return secrets
+}
+
+func (e *BehaviorDefinedEngine) getAuthSecretNames() []string {
+	if e == nil || e.definition == nil {
+		return nil
+	}
+	secrets := make([]string, 0, len(e.definition.Auth))
+	for _, binding := range e.definition.Auth {
+		if binding.Secret != "" {
+			secrets = append(secrets, binding.Secret)
+		}
 	}
 	return secrets
 }
@@ -141,7 +154,7 @@ func (e *BehaviorDefinedEngine) GetSecretValidationStep(workflowData *WorkflowDa
 			behavior.Installation.DocumentationURL,
 		)
 	}
-	secrets := e.GetRequiredSecretNames(workflowData)
+	secrets := e.getAuthSecretNames()
 	if len(secrets) == 0 {
 		return GitHubActionStep{}
 	}
@@ -504,13 +517,16 @@ func (e *BehaviorDefinedEngine) buildFirewallCommand(exec *EngineExecutionDefini
 	}
 
 	return BuildAWFCommand(AWFCommandConfig{
-		EngineName:         e.GetID(),
-		EngineCommand:      engineCommandWithPath,
-		LogFile:            logFile,
-		WorkflowData:       workflowData,
-		UsesTTY:            false,
-		AllowedDomains:     allowedDomains,
-		ExcludeEnvVarNames: ComputeAWFExcludeEnvVarNames(workflowData, e.GetRequiredSecretNames(workflowData)),
+		EngineName:     e.GetID(),
+		EngineCommand:  engineCommandWithPath,
+		LogFile:        logFile,
+		WorkflowData:   workflowData,
+		UsesTTY:        false,
+		AllowedDomains: allowedDomains,
+		// Explicit auth bindings are runtime credentials for the behavior-defined
+		// CLI itself and must reach that process. ComputeAWFExcludeEnvVarNames still
+		// excludes user-supplied engine.env and MCP/GitHub secret expressions.
+		ExcludeEnvVarNames: ComputeAWFExcludeEnvVarNames(workflowData, nil),
 	})
 }
 
