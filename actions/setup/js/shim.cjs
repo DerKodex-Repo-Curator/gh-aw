@@ -14,8 +14,22 @@
 
 const escapeCommandData = value => String(value).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 
+const secrets = new Set();
+
+const maskSecrets = value => {
+  let masked = String(value);
+  for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
+    masked = masked.replaceAll(secret, "***");
+  }
+  return masked;
+};
+
 const setSecret = /** @param {string} value */ value => {
-  process.stderr.write(`::add-mask::${escapeCommandData(value)}\n`);
+  const secret = String(value);
+  if (secret) {
+    secrets.add(secret);
+  }
+  process.stderr.write(`::add-mask::${escapeCommandData(secret)}\n`);
 };
 
 if (!global.core) {
@@ -26,7 +40,7 @@ if (!global.core) {
    * @param {string} message
    */
   const writeShimLog = (level, message) => {
-    process.stderr.write(`[${level}] ${message}\n`);
+    process.stderr.write(`[${level}] ${maskSecrets(message)}\n`);
   };
 
   global.core = {
