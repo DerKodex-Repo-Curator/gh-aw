@@ -1580,6 +1580,7 @@ func TestBuildAWFConfigJSON(t *testing.T) {
 	t.Run("default-ai-credits-pricing is emitted with non-zero rates", func(t *testing.T) {
 		cachedInput := 0.3
 		cacheWrite := 3.0
+		reasoning := 7.5
 		config := AWFCommandConfig{
 			EngineName:     "copilot",
 			AllowedDomains: "github.com",
@@ -1592,6 +1593,7 @@ func TestBuildAWFConfigJSON(t *testing.T) {
 					Output:      15.0,
 					CachedInput: &cachedInput,
 					CacheWrite:  &cacheWrite,
+					Reasoning:   &reasoning,
 				},
 				NetworkPermissions: &NetworkPermissions{
 					Firewall: &FirewallConfig{Enabled: true},
@@ -1606,6 +1608,7 @@ func TestBuildAWFConfigJSON(t *testing.T) {
 		assert.Contains(t, jsonStr, `"output":15`, "apiProxy.defaultAiCreditsPricing.output should be 15")
 		assert.Contains(t, jsonStr, `"cachedInput":0.3`, "apiProxy.defaultAiCreditsPricing.cachedInput should be emitted")
 		assert.Contains(t, jsonStr, `"cacheWrite":3`, "apiProxy.defaultAiCreditsPricing.cacheWrite should be emitted")
+		assert.Contains(t, jsonStr, `"reasoning":7.5`, "apiProxy.defaultAiCreditsPricing.reasoning should be emitted")
 	})
 
 	t.Run("default-ai-credits-pricing is omitted when not configured", func(t *testing.T) {

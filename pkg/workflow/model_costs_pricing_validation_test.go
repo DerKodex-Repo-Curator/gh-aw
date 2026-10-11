@@ -151,26 +151,42 @@ func TestValidateDefaultAiCreditsPricing(t *testing.T) {
 		assert.Contains(t, err.Error(), "positive")
 	})
 
-	t.Run("nil cache_read and nil cache_write are allowed", func(t *testing.T) {
+	t.Run("zero reasoning is rejected when set", func(t *testing.T) {
+		v := 0.0
+		err := validateDefaultAiCreditsPricing(&WorkflowData{
+			DefaultAiCreditsPricing: &AiCreditsPricingConfig{
+				Input:     1.0,
+				Output:    1.0,
+				Reasoning: &v,
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reasoning")
+		assert.Contains(t, err.Error(), "positive")
+	})
+
+	t.Run("nil optional pricing fields are allowed", func(t *testing.T) {
 		err := validateDefaultAiCreditsPricing(&WorkflowData{
 			DefaultAiCreditsPricing: &AiCreditsPricingConfig{
 				Input:  1.0,
 				Output: 1.0,
-				// CachedInput and CacheWrite are nil
+				// Optional pricing fields are nil.
 			},
 		})
 		require.NoError(t, err)
 	})
 
-	t.Run("positive cache fields are valid", func(t *testing.T) {
+	t.Run("positive optional pricing fields are valid", func(t *testing.T) {
 		cachedInput := 0.3
 		cacheWrite := 3.0
+		reasoning := 7.5
 		err := validateDefaultAiCreditsPricing(&WorkflowData{
 			DefaultAiCreditsPricing: &AiCreditsPricingConfig{
 				Input:       3.0,
 				Output:      15.0,
 				CachedInput: &cachedInput,
 				CacheWrite:  &cacheWrite,
+				Reasoning:   &reasoning,
 			},
 		})
 		require.NoError(t, err)

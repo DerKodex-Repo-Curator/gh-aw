@@ -54,17 +54,21 @@ func mergeModelCostOverlays(importedOverlays []map[string]any, mainOverlay map[s
 		return nil
 	}
 
-	merged := maps.Clone(overlays[0])
-	for i := 1; i < len(overlays); i++ {
-		merged = mergeModelCostOverlayPair(merged, overlays[i])
+	var merged map[string]any
+	for i, overlay := range overlays {
+		if i == 0 {
+			merged = maps.Clone(overlay)
+			continue
+		}
+		merged = mergeModelCostOverlayPair(merged, overlay)
 	}
 	return merged
 }
 
 func mergeModelCostOverlayPair(base, overlay map[string]any) map[string]any {
 	result := maps.Clone(base)
-	baseProviders, _ := base["providers"].(map[string]any)
-	overlayProviders, _ := overlay["providers"].(map[string]any)
+	baseProviders := modelCostMap(base, "providers")
+	overlayProviders := modelCostMap(overlay, "providers")
 
 	if len(overlayProviders) == 0 {
 		return result
@@ -83,9 +87,9 @@ func mergeModelCostOverlayPair(base, overlay map[string]any) map[string]any {
 			continue
 		}
 
-		baseProvider, _ := baseProviders[providerName].(map[string]any)
-		baseModels, _ := baseProvider["models"].(map[string]any)
-		overlayModels, _ := overlayProvider["models"].(map[string]any)
+		baseProvider := modelCostMap(baseProviders, providerName)
+		baseModels := modelCostMap(baseProvider, "models")
+		overlayModels := modelCostMap(overlayProvider, "models")
 
 		var mergedProvider map[string]any
 		if baseProvider == nil {
@@ -226,6 +230,14 @@ func extractDefaultAiCreditsPricingFromObject(pricingObj map[string]any) *AiCred
 		CacheWrite:  cacheWrite,
 		Reasoning:   reasoning,
 	}
+}
+
+func modelCostMap(value map[string]any, key string) map[string]any {
+	field, ok := value[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return field
 }
 
 func mergeModelPolicyOverlays(importedPolicies []map[string][]string, mainPolicy map[string][]string) ([]string, []string) {

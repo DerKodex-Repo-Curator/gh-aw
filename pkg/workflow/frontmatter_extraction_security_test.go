@@ -326,6 +326,7 @@ func TestExtractDefaultAiCreditsPricingFromModels(t *testing.T) {
 					"output":      float64(15.0),
 					"cache_read":  float64(0.3),
 					"cache_write": float64(3.0),
+					"reasoning":   float64(7.5),
 				},
 			},
 		}
@@ -336,8 +337,10 @@ func TestExtractDefaultAiCreditsPricingFromModels(t *testing.T) {
 		assert.InDelta(t, 15.0, pricing.Output, 1e-9, "Output should be 15.0")
 		require.NotNil(t, pricing.CachedInput, "CachedInput should be extracted when cache_read is set")
 		require.NotNil(t, pricing.CacheWrite, "CacheWrite should be extracted when cache_write is set")
+		require.NotNil(t, pricing.Reasoning, "Reasoning should be extracted when reasoning is set")
 		assert.InDelta(t, 0.3, *pricing.CachedInput, 1e-9, "CachedInput should be 0.3")
 		assert.InDelta(t, 3.0, *pricing.CacheWrite, 1e-9, "CacheWrite should be 3.0")
+		assert.InDelta(t, 7.5, *pricing.Reasoning, 1e-9, "Reasoning should be 7.5")
 	})
 
 	t.Run("default-ai-credits-pricing is nil when absent", func(t *testing.T) {
