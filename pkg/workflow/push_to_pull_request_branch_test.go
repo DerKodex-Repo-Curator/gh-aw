@@ -1274,3 +1274,69 @@ This workflow specifies an explicit numeric pull request target.
 		t.Errorf("Expected target to be '123', got %v", pushConfig["target"])
 	}
 }
+
+func TestSafeOutputNumericTargetsCompile(t *testing.T) {
+	tmpDir := testutil.TempDir(t, "test-*")
+	testMarkdown := `---
+on:
+  pull_request:
+    types: [opened]
+tools:
+  comment-memory:
+    target: 101
+safe-outputs:
+  add-comment:
+    target: 102
+  create-check-run:
+    target: 103
+  create-pull-request-review-comment:
+    target: 104
+  submit-pull-request-review:
+    target: 105
+  reply-to-pull-request-review-comment:
+    target: 106
+  push-to-pull-request-branch:
+    target: 107
+---
+
+# Test numeric safe-output targets
+`
+	mdFile := filepath.Join(tmpDir, "numeric-safe-output-targets.md")
+	if err := os.WriteFile(mdFile, []byte(testMarkdown), 0644); err != nil {
+		t.Fatalf("Failed to write test workflow: %v", err)
+	}
+
+	compiler := NewCompiler()
+	if err := compiler.CompileWorkflow(mdFile); err != nil {
+		t.Fatalf("Failed to compile workflow with numeric targets: %v", err)
+	}
+
+	workflowData, err := compiler.ParseWorkflowFile(mdFile)
+	if err != nil {
+		t.Fatalf("Failed to parse workflow with numeric targets: %v", err)
+	}
+	if workflowData.CommentMemoryConfig == nil || workflowData.CommentMemoryConfig.Target != "101" {
+		t.Errorf("Expected comment-memory target %q, got %#v", "101", workflowData.CommentMemoryConfig)
+	}
+	if workflowData.SafeOutputs == nil {
+		t.Fatal("Expected safe outputs config to be parsed")
+	}
+	if workflowData.SafeOutputs.AddComments == nil || workflowData.SafeOutputs.AddComments.Target != "102" {
+		t.Errorf("Expected add-comment target %q, got %#v", "102", workflowData.SafeOutputs.AddComments)
+	}
+	if workflowData.SafeOutputs.CreateCheckRun == nil || workflowData.SafeOutputs.CreateCheckRun.Target != "103" {
+		t.Errorf("Expected create-check-run target %q, got %#v", "103", workflowData.SafeOutputs.CreateCheckRun)
+	}
+	if workflowData.SafeOutputs.CreatePullRequestReviewComments == nil || workflowData.SafeOutputs.CreatePullRequestReviewComments.Target != "104" {
+		t.Errorf("Expected create-pull-request-review-comment target %q, got %#v", "104", workflowData.SafeOutputs.CreatePullRequestReviewComments)
+	}
+	if workflowData.SafeOutputs.SubmitPullRequestReview == nil || workflowData.SafeOutputs.SubmitPullRequestReview.Target != "105" {
+		t.Errorf("Expected submit-pull-request-review target %q, got %#v", "105", workflowData.SafeOutputs.SubmitPullRequestReview)
+	}
+	if workflowData.SafeOutputs.ReplyToPullRequestReviewComment == nil || workflowData.SafeOutputs.ReplyToPullRequestReviewComment.Target != "106" {
+		t.Errorf("Expected reply-to-pull-request-review-comment target %q, got %#v", "106", workflowData.SafeOutputs.ReplyToPullRequestReviewComment)
+	}
+	if workflowData.SafeOutputs.PushToPullRequestBranch == nil || workflowData.SafeOutputs.PushToPullRequestBranch.Target != "107" {
+		t.Errorf("Expected push-to-pull-request-branch target %q, got %#v", "107", workflowData.SafeOutputs.PushToPullRequestBranch)
+	}
+}

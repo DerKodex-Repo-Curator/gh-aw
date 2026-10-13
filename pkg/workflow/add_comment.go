@@ -75,10 +75,7 @@ func (c *Compiler) parseCommentsConfig(outputMap map[string]any) *AddCommentsCon
 		addCommentLog.Printf("Invalid allows-comment-ids value: %v", err)
 		return nil
 	}
-
-	// Pre-process target field if numeric
 	preprocessTargetFieldAsString(configData, addCommentLog)
-
 	config := parseConfigScaffoldWithPostProcess(outputMap, "add-comment", addCommentLog,
 		func(err error) *AddCommentsConfig {
 			addCommentLog.Printf("Failed to unmarshal config: %v", err)

@@ -362,7 +362,7 @@ index 0000000..abc1234
 
     it("should accept numeric target for specific PR", async () => {
       const module = await loadModule();
-      const handler = await module.main({ target: "456" });
+      const handler = await module.main({ target: 456 });
 
       expect(mockCore.info).toHaveBeenCalledWith("Target: 456");
     });
@@ -476,6 +476,7 @@ index 0000000..abc1234
       expect(result.success).toBe(false);
       expect(result.error).toContain("pull request context");
       expect(result.error).toContain("scheduled runs");
+      expect(result.error).toContain('Safe output message specified target "456"');
       expect(result.error).toContain("target: '*'");
       expect(result.error).toContain("pull_request_number");
     });
@@ -503,6 +504,26 @@ index 0000000..abc1234
       const module = await loadModule();
       const handler = await module.main({ target: "*" });
       const result = await handler({ pull_request_number: 456, branch: "should-handle-schedule-event-with-target-and-explicit-pr-num" }, {});
+
+      expect(result.success).toBe(true);
+      expect(mockGithub.rest.pulls.get).toHaveBeenCalledWith({
+        owner: "test-owner",
+        repo: "test-repo",
+        pull_number: 456,
+      });
+    });
+
+    it.each(["pull_request_number", "pullRequestNumber", "target", "pr_number", "pull_number", "item_number", "pr"])('should handle schedule event with target "*" and %s', async targetField => {
+      mockContext.eventName = "schedule";
+      delete mockContext.payload.pull_request;
+      delete mockContext.payload.issue;
+      const branch = `should-handle-schedule-target-${targetField.replaceAll("_", "-")}`;
+      createPatchFile(branch);
+      mockExec.getExecOutput.mockResolvedValue({ exitCode: 0, stdout: "abc123\n", stderr: "" });
+
+      const module = await loadModule();
+      const handler = await module.main({ target: "*" });
+      const result = await handler({ [targetField]: 456, branch }, {});
 
       expect(result.success).toBe(true);
       expect(mockGithub.rest.pulls.get).toHaveBeenCalledWith({
