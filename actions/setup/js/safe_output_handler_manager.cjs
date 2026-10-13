@@ -1001,9 +1001,10 @@ function sortMessagesByTemporaryIdDependencies(messages) {
  * @param {Map<string, Function>} messageHandlers - Map of message handler functions
  * @param {Array<Object>} messages - Array of safe output messages
  * @param {((item: {type: string, url?: string, number?: number, repo?: string, temporaryId?: string}) => void)|null} [onItemCreated] - Optional callback invoked after each successful create operation (for manifest logging)
+ * @param {{ links: string[] }} [activationCommentLinks] - Per-run activation comment links
  * @returns {Promise<{success: boolean, results: Array<any>, temporaryIdMap: Object, artifactUrlMap: Map<string, string>, outputsWithUnresolvedIds: Array<any>, missings: Object, codePushFailures: Array<{type: string, error: string}>}>}
  */
-async function processMessages(messageHandlers, messages, onItemCreated = null) {
+async function processMessages(messageHandlers, messages, onItemCreated = null, activationCommentLinks = { links: [] }) {
   if (readClaimScopeContext() && !currentClaimHandle()) {
     throw new Error("Queue safe outputs must execute in a trusted per-Claim handler context; use the scoped manager");
   }
@@ -1237,7 +1238,7 @@ async function processMessages(messageHandlers, messages, onItemCreated = null) 
 
       // Call the message handler with the individual message and resolved temp IDs
       await assertClaimAuthorized(effectiveMessage);
-      const result = await messageHandler(effectiveMessage, resolvedTemporaryIds, temporaryIdMap);
+      const result = await messageHandler(effectiveMessage, resolvedTemporaryIds, temporaryIdMap, activationCommentLinks);
 
       // Check if the handler explicitly returned a skipped result (e.g. policy filters,
       // no-op warnings, or if_no_changes: warn/ignore). Skipped results should NOT
@@ -1433,7 +1434,7 @@ async function processMessages(messageHandlers, messages, onItemCreated = null) 
 
         // Call the handler again with updated temp ID map
         await assertClaimAuthorized(deferred.message);
-        const result = await deferred.handler(deferred.message, resolvedTemporaryIds, temporaryIdMap);
+        const result = await deferred.handler(deferred.message, resolvedTemporaryIds, temporaryIdMap, activationCommentLinks);
 
         if (result && result.skipped === true && !result.deferred) {
           const msg = result.reason || result.warning || result.error || "Handler returned skipped: true";
@@ -1928,8 +1929,9 @@ async function settleClaimDelivery(scope, messages, results, options = {}) {
   return delivery;
 }
 
-/** @param {{claimPartition?: boolean, messages?: object[], verifyOutput?: Function, finalizeResults?: Function, controlIntentPath?: string, authorize?: (request: Record<string, unknown>) => unknown}} [options] */
+/** @param {{claimPartition?: boolean, messages?: object[], verifyOutput?: Function, finalizeResults?: Function, controlIntentPath?: string, activationCommentLinks?: { links: string[] }, authorize?: (request: Record<string, unknown>) => unknown}} [options] */
 async function main(options = {}) {
+  const activationCommentLinks = options.activationCommentLinks || { links: [] };
   const scope = readClaimScopeContext();
   if (scope && !options.claimPartition) {
     if (!scope.assignment) {
@@ -1962,6 +1964,7 @@ async function main(options = {}) {
         const authorize = options.authorize || (request => require("./finish_work_queue_claim.cjs").authorizeWorkerClaim({ ...request, github: unscopedGithub }));
         const claimOptions = {
           ...options,
+          activationCommentLinks,
           authorize,
           effects,
           controlMessages: controls.messages.filter(message => message.claim_handle === handle),
@@ -2115,7 +2118,7 @@ async function main(options = {}) {
     await checkRateLimitHeadroom(github, "safe_outputs_pre_check");
 
     // Process all messages in order of appearance
-    const processingResult = await processMessages(messageHandlers, allMessages, logCreatedItem);
+    const processingResult = await processMessages(messageHandlers, allMessages, logCreatedItem, activationCommentLinks);
     await finalizeLedgerAppend(config, messageHandlers);
 
     // Finalize buffered PR reviews — one review submission per distinct PR

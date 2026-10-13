@@ -404,9 +404,11 @@ async function main(config = {}) {
    * Message handler function - processes individual push_to_pull_request_branch messages
    * @param {any} message - The push_to_pull_request_branch message to process
    * @param {import('./types/handler-factory').ResolvedTemporaryIds} resolvedTemporaryIds - Map of temporary IDs to resolved IDs
+   * @param {Map<string, {repo: string, number: number}>} [_temporaryIdMap] - Shared temporary ID map
+   * @param {{ links: string[] }} [activationCommentLinks] - Per-run activation comment links
    * @returns {Promise<import('./types/handler-factory').HandlerResult>}
    */
-  return async function handlePushToPullRequestBranch(message, resolvedTemporaryIds) {
+  return async function handlePushToPullRequestBranch(message, resolvedTemporaryIds, _temporaryIdMap, activationCommentLinks) {
     // Check max count
     if (maxCount > 0 && processedCount >= maxCount) {
       core.info(`Skipping message - max count (${maxCount}) reached`);
@@ -859,7 +861,7 @@ async function main(config = {}) {
           `create manifest-protection review issue in ${repoParts.owner}/${repoParts.repo}`
         );
         core.info(`Created manifest-protection review issue #${issue.number}: ${issue.html_url}`);
-        await updateActivationComment(github, context, core, issue.html_url, issue.number, "issue");
+        await updateActivationComment(github, context, core, issue.html_url, issue.number, "issue", { activationCommentLinks });
         return attachExecutionState(
           {
             success: true,
@@ -1411,7 +1413,7 @@ async function main(config = {}) {
           }
 
           // Update activation comment with review PR link
-          await updateActivationComment(github, context, core, reviewPR.html_url, reviewPR.number, "pull_request");
+          await updateActivationComment(github, context, core, reviewPR.html_url, reviewPR.number, "pull_request", { activationCommentLinks });
 
           return {
             success: true,
@@ -1598,7 +1600,7 @@ async function main(config = {}) {
             });
 
             core.info(`Created fallback pull request #${fallbackPR.number}: ${fallbackPR.html_url}`);
-            await updateActivationComment(github, context, core, fallbackPR.html_url, fallbackPR.number, "pull_request");
+            await updateActivationComment(github, context, core, fallbackPR.html_url, fallbackPR.number, "pull_request", { activationCommentLinks });
 
             return {
               success: true,
@@ -1696,6 +1698,7 @@ async function main(config = {}) {
         await updateActivationCommentWithCommit(github, context, core, commitSha, commitUrl, {
           targetIssueNumber: pullNumber,
           targetRepo: `${repoParts.owner}/${repoParts.repo}`,
+          activationCommentLinks,
           targetGithubClient: githubClient,
         });
       }

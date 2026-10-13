@@ -751,7 +751,8 @@ func addNamedSafeOutputHandlerOutputs(data *WorkflowData, outputs map[string]str
 // exportsActivationCommentLinks reports whether the safe_outputs job may append item links
 // (created pull requests, fallback issues, pushed commits) to the activation comment.
 // Those links are exported so the conclusion job can preserve them when it re-renders
-// the activation comment with the final run status.
+// the activation comment with the final run status. Keep this aligned with handlers
+// calling updateActivationComment or updateActivationCommentWithCommit.
 func exportsActivationCommentLinks(data *WorkflowData) bool {
 	return data.SafeOutputs != nil && (data.SafeOutputs.CreatePullRequests != nil || data.SafeOutputs.PushToPullRequestBranch != nil)
 }
