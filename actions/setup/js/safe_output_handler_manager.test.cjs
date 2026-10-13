@@ -935,27 +935,6 @@ describe("Safe Output Handler Manager", () => {
   });
 
   describe("processMessages", () => {
-    it("shares activation comment link state across messages but not processing runs", async () => {
-      const accumulatorReferences = [];
-      const handler = vi.fn(async (message, _resolvedTemporaryIds, _temporaryIdMap, activationCommentLinks) => {
-        accumulatorReferences.push(activationCommentLinks);
-        activationCommentLinks.links.push(message.body);
-        return { success: true };
-      });
-      const handlers = new Map([["add_comment", handler]]);
-
-      await processMessages(handlers, [
-        { type: "add_comment", body: "first" },
-        { type: "add_comment", body: "second" },
-      ]);
-      expect(accumulatorReferences[0]).toBe(accumulatorReferences[1]);
-      expect(accumulatorReferences[0].links).toEqual(["first", "second"]);
-
-      await processMessages(handlers, [{ type: "add_comment", body: "next run" }]);
-      expect(accumulatorReferences[2]).not.toBe(accumulatorReferences[0]);
-      expect(accumulatorReferences[2].links).toEqual(["next run"]);
-    });
-
     it("should process messages in order of appearance", async () => {
       const messages = [
         { type: "add_comment", body: "Comment" },

@@ -324,6 +324,7 @@ function buildWorkflowsScopeSkip(context, coreLogger) {
  * @type {HandlerFactoryFunction}
  */
 async function main(config = {}) {
+  const activationCommentLinks = config._activationCommentLinks ?? [];
   // Extract configuration from config parameter
   const target = config.target || "triggering";
   const titlePrefix = config.title_prefix || "";
@@ -404,11 +405,9 @@ async function main(config = {}) {
    * Message handler function - processes individual push_to_pull_request_branch messages
    * @param {any} message - The push_to_pull_request_branch message to process
    * @param {import('./types/handler-factory').ResolvedTemporaryIds} resolvedTemporaryIds - Map of temporary IDs to resolved IDs
-   * @param {Map<string, {repo: string, number: number}>} [_temporaryIdMap] - Shared temporary ID map
-   * @param {{ links: string[] }} [activationCommentLinks] - Per-run activation comment links
    * @returns {Promise<import('./types/handler-factory').HandlerResult>}
    */
-  return async function handlePushToPullRequestBranch(message, resolvedTemporaryIds, _temporaryIdMap, activationCommentLinks) {
+  return async function handlePushToPullRequestBranch(message, resolvedTemporaryIds) {
     // Check max count
     if (maxCount > 0 && processedCount >= maxCount) {
       core.info(`Skipping message - max count (${maxCount}) reached`);

@@ -755,6 +755,7 @@ async function handleRemoteBranchCollision(branchName, preserveBranchName, optio
  * @type {HandlerFactoryFunction}
  */
 async function main(config = {}) {
+  const activationCommentLinks = config._activationCommentLinks ?? [];
   // Extract configuration
   const rawBranchPrefix = config.branch_prefix || "";
   const normalizedBranchPrefix = normalizeBranchName(rawBranchPrefix);
@@ -979,11 +980,9 @@ async function main(config = {}) {
    * Message handler function that processes a single create_pull_request message
    * @param {Object} message - The create_pull_request message to process
    * @param {Object} resolvedTemporaryIds - Map of temporary IDs to {repo, number}
-   * @param {Map<string, {repo: string, number: number}>} [_temporaryIdMap] - Shared temporary ID map
-   * @param {{ links: string[] }} [activationCommentLinks] - Per-run activation comment links
    * @returns {Promise<Object>} Result with success/error status and PR details
    */
-  return async function handleCreatePullRequest(message, resolvedTemporaryIds, _temporaryIdMap, activationCommentLinks) {
+  return async function handleCreatePullRequest(message, resolvedTemporaryIds) {
     // Check if we've hit the max limit
     if (processedCount >= maxCount) {
       core.warning(`Skipping create_pull_request: max count of ${maxCount} reached`);

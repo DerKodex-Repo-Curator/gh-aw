@@ -431,9 +431,10 @@ function bindHandlerToFactoryScope(handler) {
  * @param {Object} config - Safe outputs configuration
  * @param {Object} prReviewBufferRegistry - PR review buffer registry instance
  * @param {string[]} [resolvedAllowedMentionAliases] - Pre-resolved mention aliases shared across handlers
+ * @param {string[]} [activationCommentLinks] - Link accumulator shared across this invocation's handlers
  * @returns {Promise<Map<string, Function>>} Map of type to message handler function
  */
-async function loadHandlers(config, prReviewBufferRegistry, resolvedAllowedMentionAliases) {
+async function loadHandlers(config, prReviewBufferRegistry, resolvedAllowedMentionAliases, activationCommentLinks = []) {
   const messageHandlers = new Map();
 
   /** @type {Map<string, string>} */
@@ -466,6 +467,9 @@ async function loadHandlers(config, prReviewBufferRegistry, resolvedAllowedMenti
           // Inject shared PR review buffer registry into handlers that need it
           if (PR_REVIEW_HANDLER_TYPES.has(type)) {
             handlerConfig._prReviewBufferRegistry = prReviewBufferRegistry;
+          }
+          if (type === "create_pull_request" || type === "push_to_pull_request_branch") {
+            handlerConfig._activationCommentLinks = activationCommentLinks;
           }
 
           /** @type {any|null} */
@@ -1001,10 +1005,9 @@ function sortMessagesByTemporaryIdDependencies(messages) {
  * @param {Map<string, Function>} messageHandlers - Map of message handler functions
  * @param {Array<Object>} messages - Array of safe output messages
  * @param {((item: {type: string, url?: string, number?: number, repo?: string, temporaryId?: string}) => void)|null} [onItemCreated] - Optional callback invoked after each successful create operation (for manifest logging)
- * @param {{ links: string[] }} [activationCommentLinks] - Per-run activation comment links
  * @returns {Promise<{success: boolean, results: Array<any>, temporaryIdMap: Object, artifactUrlMap: Map<string, string>, outputsWithUnresolvedIds: Array<any>, missings: Object, codePushFailures: Array<{type: string, error: string}>}>}
  */
-async function processMessages(messageHandlers, messages, onItemCreated = null, activationCommentLinks = { links: [] }) {
+async function processMessages(messageHandlers, messages, onItemCreated = null) {
   if (readClaimScopeContext() && !currentClaimHandle()) {
     throw new Error("Queue safe outputs must execute in a trusted per-Claim handler context; use the scoped manager");
   }
@@ -1238,7 +1241,7 @@ async function processMessages(messageHandlers, messages, onItemCreated = null, 
 
       // Call the message handler with the individual message and resolved temp IDs
       await assertClaimAuthorized(effectiveMessage);
-      const result = await messageHandler(effectiveMessage, resolvedTemporaryIds, temporaryIdMap, activationCommentLinks);
+      const result = await messageHandler(effectiveMessage, resolvedTemporaryIds, temporaryIdMap);
 
       // Check if the handler explicitly returned a skipped result (e.g. policy filters,
       // no-op warnings, or if_no_changes: warn/ignore). Skipped results should NOT
@@ -1434,7 +1437,7 @@ async function processMessages(messageHandlers, messages, onItemCreated = null, 
 
         // Call the handler again with updated temp ID map
         await assertClaimAuthorized(deferred.message);
-        const result = await deferred.handler(deferred.message, resolvedTemporaryIds, temporaryIdMap, activationCommentLinks);
+        const result = await deferred.handler(deferred.message, resolvedTemporaryIds, temporaryIdMap);
 
         if (result && result.skipped === true && !result.deferred) {
           const msg = result.reason || result.warning || result.error || "Handler returned skipped: true";
@@ -1929,9 +1932,9 @@ async function settleClaimDelivery(scope, messages, results, options = {}) {
   return delivery;
 }
 
-/** @param {{claimPartition?: boolean, messages?: object[], verifyOutput?: Function, finalizeResults?: Function, controlIntentPath?: string, activationCommentLinks?: { links: string[] }, authorize?: (request: Record<string, unknown>) => unknown}} [options] */
+/** @param {{claimPartition?: boolean, messages?: object[], verifyOutput?: Function, finalizeResults?: Function, controlIntentPath?: string, authorize?: (request: Record<string, unknown>) => unknown, activationCommentLinks?: string[]}} [options] */
 async function main(options = {}) {
-  const activationCommentLinks = options.activationCommentLinks || { links: [] };
+  const activationCommentLinks = options.activationCommentLinks ?? [];
   const scope = readClaimScopeContext();
   if (scope && !options.claimPartition) {
     if (!scope.assignment) {
@@ -1988,7 +1991,7 @@ async function main(options = {}) {
               core.info(`Read-only preview for Claim ${handle}: ${scopedMessages.length} scoped output(s); no handlers or terminal facts`);
               return { success: true, messages: scopedMessages, delivery: await settleClaimDelivery(scope, scopedMessages, [], claimOptions) };
             }
-            const result = await main({ ...claimOptions, claimPartition: true, messages: scopedMessages });
+            const result = await main({ ...claimOptions, claimPartition: true, messages: scopedMessages, activationCommentLinks });
             if (result?.delivery) return result;
             return { ...result, delivery: await settleClaimDelivery(scope, scopedMessages, [], claimOptions) };
           })
@@ -2095,7 +2098,7 @@ async function main(options = {}) {
     const maxMentions = parseIntTemplatable(config.mentions?.max, 50);
 
     // Load and initialize handlers based on configuration (factory pattern)
-    const messageHandlers = await loadHandlers(config, prReviewBufferRegistry);
+    const messageHandlers = await loadHandlers(config, prReviewBufferRegistry, undefined, activationCommentLinks);
 
     if (messageHandlers.size === 0) {
       core.info("No handlers loaded - nothing to process");
@@ -2118,7 +2121,7 @@ async function main(options = {}) {
     await checkRateLimitHeadroom(github, "safe_outputs_pre_check");
 
     // Process all messages in order of appearance
-    const processingResult = await processMessages(messageHandlers, allMessages, logCreatedItem, activationCommentLinks);
+    const processingResult = await processMessages(messageHandlers, allMessages, logCreatedItem);
     await finalizeLedgerAppend(config, messageHandlers);
 
     // Finalize buffered PR reviews — one review submission per distinct PR
