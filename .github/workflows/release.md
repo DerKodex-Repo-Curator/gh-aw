@@ -836,19 +836,31 @@ jobs:
 
             core.info(`Previous release: tag=${previousRelease.tag_name}, id=${previousRelease.id}, sha=${previousRelease.target_commitish}, published_at=${previousRelease.published_at}, url=${previousRelease.html_url}`);
 
-            const query = [
-              `repo:${owner}/${repo}`,
-              "is:pr",
-              "is:merged",
-              `merged:${previousRelease.published_at}..${currentRelease.published_at}`
-            ].join(" ");
+            const previousPublishedAt = new Date(previousRelease.published_at);
+            core.info(`Listing merged PRs between ${previousRelease.published_at} and ${currentRelease.published_at}`);
 
-            core.info(`Searching merged PRs with query: ${query}`);
-
-            const mergedPrs = await github.paginate(github.rest.search.issuesAndPullRequests, {
-              q: query,
+            const mergedPrs = [];
+            for await (const { data: prs } of github.paginate.iterator(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "closed",
+              sort: "updated",
+              direction: "desc",
               per_page: 100
-            });
+            })) {
+              for (const pr of prs) {
+                if (!pr.merged_at) continue;
+                const mergedAt = new Date(pr.merged_at);
+                if (mergedAt >= previousPublishedAt && mergedAt <= currentPublishedAt) {
+                  mergedPrs.push(pr);
+                }
+              }
+
+              // A merge updates the PR, so older updated pages cannot contain release-window merges.
+              if (prs.length > 0 && new Date(prs[prs.length - 1].updated_at) < previousPublishedAt) {
+                break;
+              }
+            }
 
             if (mergedPrs.length === 0) {
               core.info(`No merged PRs found between ${previousRelease.tag_name} and ${releaseTag}.`);
