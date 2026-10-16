@@ -317,43 +317,115 @@ describe("collect_ndjson_output.cjs", () => {
       expect(output.items[1].details).not.toContain("exited before a terminal safe output");
       expect(mockCore.setOutput).toHaveBeenCalledWith("output_types", `${item.type},report_incomplete`);
     }),
-    it("uses the Aider engine hint and one collected session for a failed final result", async () => {
+    it.each([
+      ["environment", "stdio"],
+      ["environment", "canonical"],
+      ["metadata", "stdio"],
+      ["metadata", "canonical"],
+    ])("uses %s Aider attribution and one collected session for a failed %s result", async (attribution, source) => {
       const item = { type: "noop", message: "Nothing to publish" };
       const testFile = "/tmp/gh-aw/test-ndjson-output.txt";
-      vi.stubEnv("GH_AW_ENGINE_ID", "aider");
+      if (attribution === "environment") vi.stubEnv("GH_AW_ENGINE_ID", "aider");
+      else fs.writeFileSync(path.join(diagnosticRoot, "aw_info.json"), JSON.stringify({ engine_id: "aider" }));
       fs.writeFileSync(testFile, JSON.stringify(item));
       process.env.GH_AW_SAFE_OUTPUTS = testFile;
       fs.writeFileSync(process.env.GH_AW_SAFE_OUTPUTS_CONFIG_PATH, JSON.stringify({ noop: {} }));
       fs.writeFileSync(path.join(diagnosticRoot, "agent_execution_exit_code.txt"), "0");
-      fs.writeFileSync(path.join(diagnosticRoot, "agent-session.jsonl"), `${JSON.stringify({ type: "session.result", data: { errors: [{ status: "error" }] } })}\n`);
+      const result = { type: "session.result", data: { sourceEngine: "aider", status: "failed", errors: ["provider error"] } };
+      // Aider's declared parser rejects unframed canonical-looking stdout, unlike
+      // the generic parser used when its environment-only engine hint is lost.
+      const records = source === "stdio" ? [result, { type: "session.result", data: { status: "completed", errors: [] } }] : [result];
+      fs.writeFileSync(path.join(diagnosticRoot, source === "canonical" ? "agent-session.jsonl" : "agent-stdio.log"), records.map(JSON.stringify).join("\n"));
 
       await eval(`(async () => { ${collectScript}; await main(); })()`);
 
       const output = JSON.parse(mockCore.setOutput.mock.calls.find(call => call[0] === "output")[1]);
       expect(output.items).toEqual([item, expect.objectContaining({ type: "report_incomplete", reason: "engine_driver_failure", driverExitCode: 0 })]);
       expect(sessionSpy).toHaveBeenCalledTimes(1);
+      expect(outcomeSpy).toHaveBeenCalledWith([], undefined, sessionSpy.mock.results[0].value);
       expect(output.collectorEmptyOutputCause).toBe("engine_driver_failure");
     }),
-    it("preserves final Gemini failure over an earlier CLI error with valid output and nonzero exit", async () => {
+    it.each([0, 1])("preserves recovered engine outputs and existing failure handling with driver exit %s", async exitCode => {
       const item = { type: "noop", message: "Nothing to publish" };
       const testFile = "/tmp/gh-aw/test-ndjson-output.txt";
       fs.writeFileSync(testFile, JSON.stringify(item));
       process.env.GH_AW_SAFE_OUTPUTS = testFile;
       fs.writeFileSync(process.env.GH_AW_SAFE_OUTPUTS_CONFIG_PATH, JSON.stringify({ noop: {} }));
+      fs.writeFileSync(path.join(diagnosticRoot, "agent_execution_exit_code.txt"), String(exitCode));
+      const recoveredSessions = [
+        [
+          "pi",
+          [
+            { type: "session", version: 3, id: "recovered-pi" },
+            { type: "turn_start" },
+            { type: "turn_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Temporary provider failure" }, toolResults: [] },
+            { type: "auto_retry_end", success: true },
+            { type: "turn_start" },
+            { type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Done" }], stopReason: "stop" }, toolResults: [] },
+            { type: "agent_end", messages: [], willRetry: false },
+          ],
+        ],
+        [
+          "opencode",
+          [
+            { type: "error", sessionID: "recovered-opencode", error: { name: "TemporaryError", message: "Temporary provider failure" } },
+            { type: "text", sessionID: "recovered-opencode", part: { id: "text", text: "Done" } },
+            { type: "step_finish", sessionID: "recovered-opencode", part: { id: "finish", reason: "stop" } },
+          ],
+        ],
+        ["claude", [{ type: "result", subtype: "error_during_execution", is_error: true, errors: ["Response was interrupted due to a server error"], num_turns: 1 }]],
+        ["aider", [{ type: "session.result", data: { sourceEngine: "aider", status: "completed", exitCode: 0, errors: ["Earlier tool error"] } }]],
+      ];
+      for (const [engineId, records] of recoveredSessions) {
+        mockCore.setOutput.mockClear();
+        sessionSpy.mockClear();
+        outcomeSpy.mockClear();
+        fs.writeFileSync(path.join(diagnosticRoot, "aw_info.json"), JSON.stringify({ engine_id: engineId }));
+        fs.writeFileSync(path.join(diagnosticRoot, "agent-stdio.log"), records.map(JSON.stringify).join("\n"));
+
+        await eval(`(async () => { ${collectScript}; await main(); })()`);
+
+        const output = JSON.parse(mockCore.setOutput.mock.calls.find(call => call[0] === "output")[1]);
+        const result = sessionSpy.mock.results[0].value.events.filter(event => event.type === "session.result").at(-1);
+        expect(result.data.errors.length, engineId).toBeGreaterThan(0);
+        expect(output.items, engineId).toEqual([item]);
+        expect(output, engineId).not.toHaveProperty("collectorEmptyOutputCause");
+        expect(outcomeSpy, engineId).not.toHaveBeenCalled();
+      }
+    }),
+    it.each([
+      ["parse_args_error", 0, { type: "noop", message: "Nothing to publish" }],
+      ["parse_args_error", 1, { type: "noop", message: "Nothing to publish" }],
+      ["unrecognized_args", 0, { type: "noop", message: "Nothing to publish" }],
+      ["unrecognized_args", 1, { type: "noop", message: "Nothing to publish" }],
+      ["parse_args_error", 0, { type: "add_comment", body: "Partial progress" }],
+      ["parse_args_error", 1, { type: "add_comment", body: "Partial progress" }],
+      ["unrecognized_args", 0, { type: "add_comment", body: "Partial progress" }],
+      ["unrecognized_args", 1, { type: "add_comment", body: "Partial progress" }],
+    ])("preserves final Gemini failure over an earlier %s with exit %s and valid output %j", async (event, exitCode, item) => {
+      const testFile = "/tmp/gh-aw/test-ndjson-output.txt";
+      fs.writeFileSync(testFile, JSON.stringify(item));
+      process.env.GH_AW_SAFE_OUTPUTS = testFile;
+      fs.writeFileSync(process.env.GH_AW_SAFE_OUTPUTS_CONFIG_PATH, JSON.stringify({ [item.type]: {} }));
       fs.writeFileSync(path.join(diagnosticRoot, "aw_info.json"), JSON.stringify({ engine_id: "gemini" }));
-      fs.writeFileSync(path.join(diagnosticRoot, "agent_execution_exit_code.txt"), "1");
+      fs.writeFileSync(path.join(diagnosticRoot, "agent_execution_exit_code.txt"), String(exitCode));
       fs.writeFileSync(path.join(diagnosticRoot, "agent-stdio.log"), `${JSON.stringify({ type: "result", status: "error" })}\n`);
       const auditPath = path.join(diagnosticRoot, "mcp-cli-audit/safeoutputs.jsonl");
       fs.mkdirSync(path.dirname(auditPath), { recursive: true });
-      fs.writeFileSync(auditPath, `${JSON.stringify({ event: "parse_args_error" })}\n`);
+      fs.writeFileSync(auditPath, `${JSON.stringify({ event })}\n`);
 
       await eval(`(async () => { ${collectScript}; await main(); })()`);
 
       const output = JSON.parse(mockCore.setOutput.mock.calls.find(call => call[0] === "output")[1]);
-      expect(output.items).toEqual([item, expect.objectContaining({ type: "report_incomplete", reason: "engine_driver_failure", driverExitCode: 1 })]);
-      expect(output.items[1].details).toContain("The safeoutputs CLI failed.");
+      expect(output.items).toEqual([item, expect.objectContaining({ type: "report_incomplete", reason: "engine_driver_failure", failureCause: "unknown", driverExitCode: exitCode })]);
+      expect(output.items[1].details).toContain("Historical safeoutputs CLI argument errors were recorded");
+      expect(output.items[1].details).toContain("they do not explain the engine's failed final result");
+      expect(output.items[1].details).not.toContain("The safeoutputs CLI failed.");
+      expect(output.items[1].details).not.toContain("safeoutputs <tool> --help");
+      expect(output.items[1].details).not.toContain("--key value flags");
       expect(output.items[1].details).toContain("The engine's final result reported an error");
       expect(output.collectorEmptyOutputCause).toBe("engine_driver_failure");
+      expect(output.collectorFailureCause).toBe("unknown");
     }),
     it.each([
       [{ type: "result", status: "success" }],

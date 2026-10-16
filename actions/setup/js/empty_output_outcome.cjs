@@ -151,7 +151,15 @@ function hasFailedFinalResult(events) {
   const workflowInfo = events.find(event => event.type === "workflow.info" && event.provenance.component === "workflow");
   const engineId = process.env.GH_AW_ENGINE_ID ?? workflowInfo?.data.engineId ?? workflowInfo?.data.engine_id;
   if (typeof engineId !== "string" || !["aider", "gemini"].includes(engineId)) return false;
+  // collectUnifiedSession assigns this provenance to normalized agent sources,
+  // independently of native engine tags; nested and detection results are excluded.
   const result = events.filter(event => event.type === "session.result" && event.provenance.component === "agent" && event.provenance.phase === "agent" && !isNestedSessionEvent(event)).at(-1);
+  // Aider retains cumulative tool errors even after recovery. Its harness records
+  // terminal status/exitCode explicitly; Pi/OpenCode/Claude keep their existing policy.
+  if (engineId === "aider") {
+    const exitCode = result?.data.exitCode;
+    return result?.data.status === "failed" || (Number.isSafeInteger(exitCode) && exitCode !== 0);
+  }
   return Array.isArray(result?.data.errors) && result.data.errors.length > 0;
 }
 
@@ -205,7 +213,11 @@ function buildEmptyOutputOutcome(errors, rootDir = "/tmp/gh-aw", session) {
           if (["parse_args_error", "unrecognized_args"].includes(entry?.event)) {
             safeoutputsCliError = true;
             if (!failedFinalResult) reason = "safeoutputs_cli_error";
-            diagnostics.add("The safeoutputs CLI failed. Run `safeoutputs <tool> --help` and pass a single quoted JSON object or --key value flags.");
+            diagnostics.add(
+              failedFinalResult
+                ? "Historical safeoutputs CLI argument errors were recorded; they do not explain the engine's failed final result."
+                : "The safeoutputs CLI failed. Run `safeoutputs <tool> --help` and pass a single quoted JSON object or --key value flags."
+            );
           }
         } catch {
           // Ignore malformed audit records without losing the remaining evidence.

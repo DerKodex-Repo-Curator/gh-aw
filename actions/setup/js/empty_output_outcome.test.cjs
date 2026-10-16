@@ -5,7 +5,7 @@ import path from "path";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
-const { buildEmptyOutputOutcome, buildCompletionEvidence, hasFailedFinalResult } = require("./empty_output_outcome.cjs");
+const { buildEmptyOutputOutcome, buildCompletionEvidence, collectOutcomeSession, hasFailedFinalResult } = require("./empty_output_outcome.cjs");
 
 describe("empty output outcome", () => {
   let rootDir;
@@ -45,11 +45,14 @@ describe("empty output outcome", () => {
   it.each([
     ["no result", "gemini", [], false],
     ["a failed Gemini result", "gemini", [{ data: { errors: [{ status: "error" }] } }], true],
-    ["a failed Aider result", "aider", [{ data: { errors: [{ status: "error" }] } }], true],
+    ["a failed Aider result", "aider", [{ data: { status: "failed", errors: ["provider error"] } }], true],
+    ["an Aider terminal nonzero exit", "aider", [{ data: { exitCode: 1, errors: [] } }], true],
+    ["a recovered Aider result", "aider", [{ data: { status: "completed", exitCode: 0, errors: ["earlier tool error"] } }], false],
+    ["an Aider result without terminal failure evidence", "aider", [{ data: { errors: ["earlier tool error"] } }], false],
     ["an empty errors array", "gemini", [{ data: { errors: [] } }], false],
-    ["a recovered Pi result", "pi", [{ data: { errors: [{ status: "error" }] } }, { data: {} }], false],
-    ["a recovered OpenCode result", "opencode", [{ data: { errors: [{ status: "error" }] } }, { data: {} }], false],
-    ["a recovered Claude result", "claude", [{ data: { errors: [{ status: "error" }] } }, { data: {} }], false],
+    ["a recovered Pi result with cumulative errors", "pi", [{ data: { errors: ["earlier provider error"] } }], false],
+    ["a recovered OpenCode result with cumulative errors", "opencode", [{ data: { errors: ["earlier provider error"], status: "error" } }], false],
+    ["a Claude error after noop", "claude", [{ data: { errors: ["Response was interrupted due to a server error"] } }], false],
     ["a final failure after success", "gemini", [{ data: {} }, { data: { errors: [{ status: "error" }] } }], true],
     ["a child failure", "gemini", [{ data: { errors: [{ status: "error" }], agentId: "child" } }], false],
     ["a child success after main failure", "gemini", [{ data: { errors: [{ status: "error" }] } }, { data: { errors: [], parentToolUseId: "child" } }], true],
@@ -61,6 +64,23 @@ describe("empty output outcome", () => {
       ...records.map(record => ({ type: "session.result", provenance: { component: "agent", phase: "agent" }, ...record })),
     ];
     expect(hasFailedFinalResult(events)).toBe(expected);
+  });
+
+  it.each(["aider", "gemini", "pi", "opencode", "claude"])("uses collector-assigned provenance rather than native %s result tags", engineId => {
+    fs.writeFileSync(path.join(rootDir, "aw_info.json"), JSON.stringify({ engine_id: engineId }));
+    writeEvents([
+      {
+        type: "session.result",
+        provenance: { component: "native-engine", phase: "native-phase" },
+        data: { sourceEngine: engineId, status: "failed", errors: ["provider error"] },
+      },
+    ]);
+
+    const { events } = collectOutcomeSession(rootDir);
+    const result = events.find(event => event.type === "session.result");
+
+    expect(result.provenance).toMatchObject({ component: "agent", phase: "agent", native: { component: "native-engine", phase: "native-phase" } });
+    expect(hasFailedFinalResult(events)).toBe(["aider", "gemini"].includes(engineId));
   });
 
   it("distinguishes a failed final Gemini result from missing terminal output despite exit 0", () => {
@@ -76,16 +96,26 @@ describe("empty output outcome", () => {
     expect(outcome.details).not.toContain("without emitting a terminal safe output");
   });
 
-  it("preserves a failed final Gemini result over a recovered safeoutputs CLI error", () => {
+  it.each([
+    ["parse_args_error", 0],
+    ["parse_args_error", 1],
+    ["unrecognized_args", 0],
+    ["unrecognized_args", 1],
+  ])("preserves a failed final Gemini result over a recovered %s with exit %s", (event, exitCode) => {
     fs.writeFileSync(path.join(rootDir, "aw_info.json"), JSON.stringify({ engine_id: "gemini" }));
+    fs.writeFileSync(path.join(rootDir, "agent_execution_exit_code.txt"), String(exitCode));
     writeEvents([{ type: "session.result", data: { errors: [{ status: "error" }] } }]);
     fs.mkdirSync(path.join(rootDir, "mcp-cli-audit"));
-    fs.writeFileSync(path.join(rootDir, "mcp-cli-audit/safeoutputs.jsonl"), `${JSON.stringify({ event: "parse_args_error" })}\n`);
+    fs.writeFileSync(path.join(rootDir, "mcp-cli-audit/safeoutputs.jsonl"), `${JSON.stringify({ event })}\n`);
 
     const outcome = buildEmptyOutputOutcome([], rootDir);
 
-    expect(outcome).toMatchObject({ reason: "engine_driver_failure", failureCause: "unknown" });
-    expect(outcome.details).toContain("The safeoutputs CLI failed.");
+    expect(outcome).toMatchObject({ reason: "engine_driver_failure", failureCause: "unknown", driverExitCode: exitCode });
+    expect(outcome.details).toContain("Historical safeoutputs CLI argument errors were recorded");
+    expect(outcome.details).toContain("they do not explain the engine's failed final result");
+    expect(outcome.details).not.toContain("The safeoutputs CLI failed.");
+    expect(outcome.details).not.toContain("safeoutputs <tool> --help");
+    expect(outcome.details).not.toContain("--key value flags");
     expect(outcome.details).toContain("The engine's final result reported an error");
   });
 
@@ -528,13 +558,20 @@ describe("empty output outcome", () => {
     expect(outcome.details).not.toContain("Invalid output");
   });
 
-  it("preserves CLI parse classification when the bridge exits non-zero without copying payloads", () => {
+  it.each([
+    ["parse_args_error", 0],
+    ["parse_args_error", 1],
+    ["unrecognized_args", 0],
+    ["unrecognized_args", 1],
+  ])("preserves empty-output CLI classification for %s with exit %s without copying payloads", (event, exitCode) => {
     fs.mkdirSync(path.join(rootDir, "mcp-cli-audit"));
-    fs.writeFileSync(path.join(rootDir, "mcp-cli-audit/safeoutputs.jsonl"), 'not JSON\n{"event":"parse_args_error","tool":"noop","error":"private payload"}\n');
-    fs.writeFileSync(path.join(rootDir, "agent_execution_exit_code.txt"), "1");
+    fs.writeFileSync(path.join(rootDir, "mcp-cli-audit/safeoutputs.jsonl"), `not JSON\n${JSON.stringify({ event, tool: "noop", error: "private payload" })}\n`);
+    fs.writeFileSync(path.join(rootDir, "agent_execution_exit_code.txt"), String(exitCode));
     const outcome = buildEmptyOutputOutcome([], rootDir);
-    expect(outcome.reason).toBe("safeoutputs_cli_error");
+    expect(outcome).toMatchObject({ reason: "safeoutputs_cli_error", failureCause: "request_rejection", driverExitCode: exitCode });
+    expect(outcome.details).toContain("The safeoutputs CLI failed.");
     expect(outcome.details).toContain("safeoutputs <tool> --help");
+    expect(outcome.details).not.toContain("Historical safeoutputs CLI argument errors");
     expect(outcome.details).not.toContain("private payload");
   });
 
